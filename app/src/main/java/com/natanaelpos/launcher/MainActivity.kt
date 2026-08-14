@@ -1,19 +1,25 @@
 package com.natanaelpos.launcher
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.PermissionRequest
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewAssetLoader
 import java.io.File
 import java.io.FileOutputStream
@@ -24,6 +30,7 @@ class MainActivity : Activity() {
 
     private val siteUrl = "https://evictorhugo4-bit.github.io/Natanael-POS/"
     private val virtualDomain = "appassets.androidplatform.net"
+    private val cameraPermissionCode = 100
 
     private lateinit var webView: WebView
     private lateinit var statusText: TextView
@@ -62,11 +69,14 @@ class MainActivity : Activity() {
             visibility = View.GONE
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
         }
 
         root.addView(statusText)
         root.addView(webView)
         setContentView(root)
+
+        requestCameraPermissionIfNeeded()
 
         assetLoader = WebViewAssetLoader.Builder()
             .setDomain(virtualDomain)
@@ -97,7 +107,27 @@ class MainActivity : Activity() {
             }
         }
 
+        // Esto es lo nuevo: le da permiso a la PÁGINA WEB (no solo a Android)
+        // para usar la cámara cuando el JavaScript la pide (ej. el escáner de códigos).
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onPermissionRequest(request: PermissionRequest) {
+                runOnUiThread {
+                    request.grant(request.resources)
+                }
+            }
+        }
+
         loadContent()
+    }
+
+    private fun requestCameraPermissionIfNeeded() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this, arrayOf(Manifest.permission.CAMERA), cameraPermissionCode
+            )
+        }
     }
 
     private fun loadContent() {
