@@ -30,7 +30,7 @@ class MainActivity : Activity() {
 
     private val siteUrl = "https://evictorhugo4-bit.github.io/Natanael-POS/"
     private val virtualDomain = "appassets.androidplatform.net"
-    private val cameraPermissionCode = 100
+    private val mediaPermissionCode = 100
 
     private lateinit var webView: WebView
     private lateinit var statusText: TextView
@@ -76,7 +76,7 @@ class MainActivity : Activity() {
         root.addView(webView)
         setContentView(root)
 
-        requestCameraPermissionIfNeeded()
+        requestMediaPermissionsIfNeeded()
 
         assetLoader = WebViewAssetLoader.Builder()
             .setDomain(virtualDomain)
@@ -107,8 +107,8 @@ class MainActivity : Activity() {
             }
         }
 
-        // Esto es lo nuevo: le da permiso a la PÁGINA WEB (no solo a Android)
-        // para usar la cámara cuando el JavaScript la pide (ej. el escáner de códigos).
+        // Le da permiso a la PÁGINA WEB para usar cámara y/o micrófono cuando el
+        // JavaScript los pide (ej. escáner de códigos, notas de voz, etc.)
         webView.webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: PermissionRequest) {
                 runOnUiThread {
@@ -120,13 +120,23 @@ class MainActivity : Activity() {
         loadContent()
     }
 
-    private fun requestCameraPermissionIfNeeded() {
+    private fun requestMediaPermissionsIfNeeded() {
+        val needed = mutableListOf<String>()
+
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            ActivityCompat.requestPermissions(
-                this, arrayOf(Manifest.permission.CAMERA), cameraPermissionCode
-            )
+            needed.add(Manifest.permission.CAMERA)
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            needed.add(Manifest.permission.RECORD_AUDIO)
+        }
+
+        if (needed.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, needed.toTypedArray(), mediaPermissionCode)
         }
     }
 
