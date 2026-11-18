@@ -3,13 +3,21 @@ package com.natanaelpos.launcher
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
+import android.util.Base64
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -18,6 +26,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewAssetLoader
@@ -25,6 +34,63 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+
+/**
+ * Puente JavaScript -> Android para guardar archivos (PDF, CSV, respaldos) en la carpeta Descargas.
+ * La página lo usa así:  AndroidBridge.saveBase64File(nombre, mime, datoEnBase64)
+ * Solo acepta llamadas si la página actual es la de Natanael POS (isTrusted).
+ */
+class AndroidBridge(
+    private val activity: Activity,
+    private val isTrusted: () -> Boolean
+) {
+    @JavascriptInterface
+    fun saveBase64File(name: String, mime: String, base64: String) {
+        if (!isTrusted()) {
+            toast("Operación no permitida desde esta página")
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            toast("Guardar archivos requiere Android 10 o superior")
+            return
+        }
+        try {
+            val safeName = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "archivo" }
+            val bytes = Base64.decode(base64, Base64.DEFAULT)
+
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, safeName)
+                put(MediaStore.Downloads.MIME_TYPE, mime)
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            }
+            val uri = activity.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            if (uri == null) {
+                toast("No se pudo crear el archivo en Descargas")
+                return
+            }
+            activity.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+
+            activity.runOnUiThread {
+                Toast.makeText(activity, "Guardado en Descargas: $safeName", Toast.LENGTH_LONG).show()
+                try {
+                    val view = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, mime)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    activity.startActivity(view)
+                } catch (e: Exception) {
+                    // no hay app para abrir este tipo de archivo: queda guardado igual
+                }
+            }
+        } catch (e: Exception) {
+            toast("No se pudo guardar: ${e.message}")
+        }
+    }
+
+    private fun toast(msg: String) {
+        activity.runOnUiThread { Toast.makeText(activity, msg, Toast.LENGTH_LONG).show() }
+    }
+}
 
 class MainActivity : Activity() {
 
@@ -39,6 +105,14 @@ class MainActivity : Activity() {
     private lateinit var assetLoader: WebViewAssetLoader
 
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // URL de la página que está cargada (se actualiza desde el WebViewClient) para validar el puente
+    @Volatile private var currentUrl: String = ""
+
+    private fun isTrustedPage(): Boolean {
+        val url = currentUrl
+        return url.startsWith(siteUrl) || url.startsWith("https://$virtualDomain/")
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,6 +146,9 @@ class MainActivity : Activity() {
             settings.mediaPlaybackRequiresUserGesture = false
         }
 
+        // Puente para guardar archivos en Descargas (la página lo llama como window.AndroidBridge)
+        webView.addJavascriptInterface(AndroidBridge(this) { isTrustedPage() }, "AndroidBridge")
+
         root.addView(statusText)
         root.addView(webView)
         setContentView(root)
@@ -91,8 +168,14 @@ class MainActivity : Activity() {
                 return assetLoader.shouldInterceptRequest(request.url)
             }
 
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                currentUrl = url ?: ""
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                currentUrl = url ?: ""
                 showWebView()
             }
 
