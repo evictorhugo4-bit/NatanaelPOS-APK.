@@ -7,6 +7,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -50,20 +51,22 @@ class AndroidBridge(
             toast("Operación no permitida desde esta página")
             return
         }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        // Android 10 (API 29) o superior. Se usan constantes de texto en vez de MediaStore.Downloads
+        // para que compile con cualquier compileSdk y no dispare el lint "NewApi".
+        if (Build.VERSION.SDK_INT < 29) {
             toast("Guardar archivos requiere Android 10 o superior")
             return
         }
         try {
-            val safeName = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "archivo" }
+            val safeName = name.replace(Regex("[\\/:*?\"<>|]"), "_").ifBlank { "archivo" }
             val bytes = Base64.decode(base64, Base64.DEFAULT)
 
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, safeName)
-                put(MediaStore.Downloads.MIME_TYPE, mime)
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-            }
-            val uri = activity.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            val values = ContentValues()
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, safeName)
+            values.put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            values.put("relative_path", Environment.DIRECTORY_DOWNLOADS)
+            val collection = Uri.parse("content://media/external/downloads")
+            val uri = activity.contentResolver.insert(collection, values)
             if (uri == null) {
                 toast("No se pudo crear el archivo en Descargas")
                 return
@@ -73,10 +76,9 @@ class AndroidBridge(
             activity.runOnUiThread {
                 Toast.makeText(activity, "Guardado en Descargas: $safeName", Toast.LENGTH_LONG).show()
                 try {
-                    val view = Intent(Intent.ACTION_VIEW).apply {
-                        setDataAndType(uri, mime)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
+                    val view = Intent(Intent.ACTION_VIEW)
+                    view.setDataAndType(uri, mime)
+                    view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     activity.startActivity(view)
                 } catch (e: Exception) {
                     // no hay app para abrir este tipo de archivo: queda guardado igual
